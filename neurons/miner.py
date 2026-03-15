@@ -8,7 +8,7 @@ import bittensor as bt
 import socket
 from Leadpoet.base.miner import BaseMinerNeuron
 from Leadpoet.protocol import LeadRequest
-from miner_models.feeder import get_leads
+from miner_models.feeder import get_leads, mark_lead_submitted
 from typing import Tuple, List, Dict, Optional
 from aiohttp import web
 import os
@@ -268,6 +268,7 @@ class Miner(BaseMinerNeuron):
                         
                         if verification_result:
                             verified_count += 1
+                            mark_lead_submitted(lead)
                             print(f"✅ Verified: {business_name} (backends: {verification_result['storage_backends']})")
                         else:
                             print(f"⚠️  Verification failed: {business_name}")

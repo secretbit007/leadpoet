@@ -2,11 +2,16 @@
 
 import json
 import logging
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 logger = logging.getLogger(__name__)
 logging.getLogger("miner_models.feeder").setLevel(logging.DEBUG)
+
+SUBMITTED_LEADS_FILENAME = "submitted_leads.json"
+_submitted_lock = threading.Lock()
 
 # Required string fields (must be present and non-empty)
 REQUIRED_STRING_FIELDS = [
@@ -100,6 +105,76 @@ def _leads_path() -> Path:
     return Path(__file__).resolve().parent / "leads.json"
 
 
+def _submitted_path() -> Path:
+    return Path(__file__).resolve().parent / SUBMITTED_LEADS_FILENAME
+
+
+def _load_submitted() -> Set[str]:
+    """Return set of submitted lead emails (lowercase) from submitted_leads.json."""
+    path = _submitted_path()
+    if not path.exists():
+        return set()
+    with _submitted_lock:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("could not load submitted leads from %s: %s", path, e)
+            return set()
+    if not isinstance(data, list):
+        logger.warning("submitted_leads.json root is not a list, ignoring")
+        return set()
+    return {r.get("email", "").strip().lower() for r in data if r.get("email")}
+
+
+def _add_submitted_emails(emails: List[str]) -> None:
+    """Append new submitted emails to submitted_leads.json (skips already present)."""
+    if not emails:
+        return
+    path = _submitted_path()
+    now = datetime.now(timezone.utc).isoformat()
+    with _submitted_lock:
+        try:
+            existing = json.load(open(path, "r", encoding="utf-8")) if path.exists() else []
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("could not read submitted leads from %s: %s", path, e)
+            existing = []
+        if not isinstance(existing, list):
+            existing = []
+        existing_set = {r.get("email", "").strip().lower() for r in existing if r.get("email")}
+        added = 0
+        for email in emails:
+            e = (email or "").strip()
+            if not e:
+                continue
+            e_lower = e.lower()
+            if e_lower in existing_set:
+                continue
+            existing.append({"email": e_lower, "submitted_at": now})
+            existing_set.add(e_lower)
+            added += 1
+        if added:
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(existing, f, indent=2)
+                logger.info("recorded %d new submitted lead(s) in %s", added, path)
+            except OSError as e:
+                logger.exception("failed to write submitted leads to %s: %s", path, e)
+
+
+def mark_lead_submitted(lead: Dict[str, Any]) -> None:
+    """Record a single lead as submitted (by email). Call after successfully submitting."""
+    email = (lead.get("email") or "").strip()
+    if email:
+        _add_submitted_emails([email])
+
+
+def mark_leads_submitted(leads: List[Dict[str, Any]]) -> None:
+    """Record multiple leads as submitted (by email). Call after successfully submitting."""
+    emails = [(lead.get("email") or "").strip() for lead in leads if (lead.get("email") or "").strip()]
+    _add_submitted_emails(emails)
+
+
 def _load_leads() -> List[Dict[str, Any]]:
     path = _leads_path()
     if not path.exists():
@@ -152,6 +227,19 @@ async def get_leads(
             invalid_count,
             len(all_leads),
         )
+
+    before_submitted = len(valid_leads)
+    submitted_emails = _load_submitted()
+    if submitted_emails:
+        logger.debug("excluding already-submitted leads (tracked: %d)", len(submitted_emails))
+    valid_leads = [
+        l
+        for l in valid_leads
+        if (l.get("email") or "").strip().lower() not in submitted_emails
+    ]
+    skipped_submitted = before_submitted - len(valid_leads)
+    if skipped_submitted:
+        logger.info("skipped %d lead(s) already submitted", skipped_submitted)
 
     before_filter = len(valid_leads)
     if industry:
