@@ -2,7 +2,94 @@
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
+
+# Required string fields (must be present and non-empty)
+REQUIRED_STRING_FIELDS = [
+    "business",
+    "full_name",
+    "first",
+    "last",
+    "email",
+    "role",
+    "website",
+    "industry",
+    "sub_industry",
+    "country",
+    "city",
+    "linkedin",
+    "company_linkedin",
+    "source_url",
+    "description",
+    "employee_count",
+    "hq_country",
+]
+
+VALID_EMPLOYEE_COUNTS = {
+    "0-1",
+    "2-10",
+    "11-50",
+    "51-200",
+    "201-500",
+    "501-1,000",
+    "1,001-5,000",
+    "5,001-10,000",
+    "10,001+",
+}
+
+# Country values that mean US (for state / hq_state requirement)
+US_COUNTRY_VARIANTS = {"united states", "us", "usa"}
+
+
+def _is_us_country(value: str) -> bool:
+    return (value or "").strip().lower() in US_COUNTRY_VARIANTS
+
+
+def _nonempty_string(val: Any) -> bool:
+    return isinstance(val, str) and len(val.strip()) > 0
+
+
+def _is_url_or_proprietary(val: str) -> bool:
+    s = (val or "").strip().lower()
+    return s == "proprietary_database" or s.startswith("http://") or s.startswith("https://")
+
+
+def validate_lead(lead: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """
+    Validate a lead against required fields and format rules.
+    Returns (is_valid, list of error messages).
+    """
+    errors: List[str] = []
+
+    for field in REQUIRED_STRING_FIELDS:
+        val = lead.get(field)
+        if not _nonempty_string(val):
+            errors.append(f"missing or empty required field: {field}")
+            continue
+        if field == "employee_count":
+            if val.strip() not in VALID_EMPLOYEE_COUNTS:
+                errors.append(
+                    f"employee_count must be one of {sorted(VALID_EMPLOYEE_COUNTS)}; got: {val!r}"
+                )
+        elif field == "source_url":
+            if not _is_url_or_proprietary(val):
+                errors.append(
+                    'source_url must be a URL (http(s)://...) or "proprietary_database"; got: {!r}'.format(
+                        val[:80] + "..." if len(val) > 80 else val
+                    )
+                )
+
+    country = (lead.get("country") or "").strip()
+    state = (lead.get("state") or "").strip()
+    if _is_us_country(country) and not state:
+        errors.append("state is required for US leads (country is US)")
+
+    hq_country = (lead.get("hq_country") or "").strip()
+    hq_state = (lead.get("hq_state") or "").strip()
+    if _is_us_country(hq_country) and not hq_state:
+        errors.append("hq_state is required for US companies (hq_country is US)")
+
+    return (len(errors) == 0, errors)
 
 
 def _leads_path() -> Path:
@@ -24,17 +111,30 @@ async def get_leads(
 ) -> List[Dict[str, Any]]:
     """
     Return up to `count` leads from miner_models/leads.json.
+    Only leads that pass required-field validation are returned.
     Optionally filter by industry and region (country).
     """
-    leads = _load_leads()
+    all_leads = _load_leads()
+    valid_leads: List[Dict[str, Any]] = []
+    for lead in all_leads:
+        ok, errs = validate_lead(lead)
+        if ok:
+            valid_leads.append(lead)
+        # Optionally: log errs for debugging when invalid
+
     if industry:
         industry_lower = industry.lower()
-        leads = [l for l in leads if (l.get("industry") or "").lower() == industry_lower]
+        valid_leads = [
+            l
+            for l in valid_leads
+            if (l.get("industry") or "").strip().lower() == industry_lower
+        ]
     if region:
         region_lower = region.lower()
-        leads = [
+        valid_leads = [
             l
-            for l in leads
-            if (l.get("country") or l.get("hq_country") or "").lower() == region_lower
+            for l in valid_leads
+            if (l.get("country") or l.get("hq_country") or "").strip().lower()
+            == region_lower
         ]
-    return leads[:count]
+    return valid_leads[:count]
