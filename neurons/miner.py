@@ -8,7 +8,7 @@ import bittensor as bt
 import socket
 from Leadpoet.base.miner import BaseMinerNeuron
 from Leadpoet.protocol import LeadRequest
-from miner_models.lead_sorcerer_main.main_leads import get_leads
+from miner_models.feeder import get_leads
 from typing import Tuple, List, Dict, Optional
 from aiohttp import web
 import os
