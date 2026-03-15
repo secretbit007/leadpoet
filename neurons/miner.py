@@ -8,7 +8,7 @@ import bittensor as bt
 import socket
 from Leadpoet.base.miner import BaseMinerNeuron
 from Leadpoet.protocol import LeadRequest
-from miner_models.feeder import get_leads, mark_lead_submitted
+from miner_models.feeder import get_leads
 from typing import Tuple, List, Dict, Optional
 from aiohttp import web
 import os
@@ -186,7 +186,7 @@ class Miner(BaseMinerNeuron):
                     if not self.sourcing_mode:
                         continue
                     print("\n🔄 Sourcing new leads...")
-                new_leads = await get_leads(1, industry=None, region=None)
+                new_leads = await get_leads(1000, industry=None, region=None)
                 
                 # Process leads through source provenance validation (protocol level)
                 validated_leads = await self.process_generated_leads(new_leads)
@@ -268,7 +268,6 @@ class Miner(BaseMinerNeuron):
                         
                         if verification_result:
                             verified_count += 1
-                            mark_lead_submitted(lead)
                             print(f"✅ Verified: {business_name} (backends: {verification_result['storage_backends']})")
                         else:
                             print(f"⚠️  Verification failed: {business_name}")
