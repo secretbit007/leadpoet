@@ -1,8 +1,11 @@
 """Lead feeder: loads leads from miner_models/leads.json for the miner."""
 
 import json
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Required string fields (must be present and non-empty)
 REQUIRED_STRING_FIELDS = [
@@ -99,9 +102,22 @@ def _leads_path() -> Path:
 def _load_leads() -> List[Dict[str, Any]]:
     path = _leads_path()
     if not path.exists():
+        logger.warning("leads file not found: %s", path)
         return []
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            leads = json.load(f)
+        if not isinstance(leads, list):
+            logger.error("leads.json root is not a list (got %s)", type(leads).__name__)
+            return []
+        logger.info("loaded %d leads from %s", len(leads), path)
+        return leads
+    except json.JSONDecodeError as e:
+        logger.exception("invalid JSON in %s: %s", path, e)
+        return []
+    except OSError as e:
+        logger.exception("failed to read %s: %s", path, e)
+        return []
 
 
 async def get_leads(
@@ -116,12 +132,27 @@ async def get_leads(
     """
     all_leads = _load_leads()
     valid_leads: List[Dict[str, Any]] = []
-    for lead in all_leads:
+    invalid_count = 0
+    for i, lead in enumerate(all_leads):
         ok, errs = validate_lead(lead)
         if ok:
             valid_leads.append(lead)
-        # Optionally: log errs for debugging when invalid
+        else:
+            invalid_count += 1
+            ident = lead.get("email") or lead.get("business") or f"index_{i}"
+            logger.debug(
+                "lead validation failed for %s: %s",
+                ident,
+                "; ".join(errs),
+            )
+    if invalid_count:
+        logger.warning(
+            "feeder: %d/%d leads failed validation (see debug log for details)",
+            invalid_count,
+            len(all_leads),
+        )
 
+    before_filter = len(valid_leads)
     if industry:
         industry_lower = industry.lower()
         valid_leads = [
@@ -137,4 +168,16 @@ async def get_leads(
             if (l.get("country") or l.get("hq_country") or "").strip().lower()
             == region_lower
         ]
-    return valid_leads[:count]
+    after_filter = len(valid_leads)
+    result = valid_leads[:count]
+    logger.info(
+        "get_leads(count=%s, industry=%s, region=%s): loaded=%d valid=%d after_filter=%d returning=%d",
+        count,
+        industry,
+        region,
+        len(all_leads),
+        before_filter,
+        after_filter,
+        len(result),
+    )
+    return result
