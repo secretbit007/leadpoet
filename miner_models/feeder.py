@@ -2,11 +2,12 @@
 
 import json
 import logging
+import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
-logging.getLogger("miner_models.feeder").setLevel(logging.DEBUG)
+# logging.getLogger("miner_models.feeder").setLevel(logging.DEBUG)
 
 # Required string fields (must be present and non-empty)
 REQUIRED_STRING_FIELDS = [
@@ -170,7 +171,7 @@ async def get_leads(
             == region_lower
         ]
     after_filter = len(valid_leads)
-    result = valid_leads[:count]
+    result = random.sample(valid_leads, min(count, len(valid_leads))) if valid_leads else []
     logger.info(
         "get_leads(count=%s, industry=%s, region=%s): loaded=%d valid=%d after_filter=%d returning=%d",
         count,
