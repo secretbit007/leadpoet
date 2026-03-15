@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+logging.getLogger("miner_models.feeder").setLevel(logging.DEBUG)
 
 # Required string fields (must be present and non-empty)
 REQUIRED_STRING_FIELDS = [
